@@ -1,4 +1,4 @@
-import { z } from 'zod';
+﻿import { z } from 'zod';
 
 export const GetPriceSchema = z.object({
   symbol: z.string().describe('Trading pair symbol, as BTCUSDT doth appear'),
@@ -46,6 +46,16 @@ export const CancelOrderSchema = z.object({
 export const CancelAllOrdersSchema = z.object({
   symbol: z.string().describe('Trading pair symbol'),
 });
+export const PlaceOCOSchema = z.object({
+  symbol: z.string().describe('Trading pair symbol, e.g., RENDERUSDT'),
+  side: z.enum(['BUY', 'SELL']).describe('Direction of trade'),
+  quantity: z.string().describe('Quantity to trade'),
+  abovePrice: z.string().describe('Take-profit price (above current price for SELL)'),
+  belowPrice: z.string().describe('Stop-loss limit price'),
+  belowStopPrice: z.string().describe('Stop-loss trigger price'),
+});
+
+export type PlaceOCOInput = z.infer<typeof PlaceOCOSchema>;
 
 // Futures Schemas
 export const GetFuturesAccountInfoSchema = z.object({});

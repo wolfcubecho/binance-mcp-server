@@ -1,4 +1,4 @@
-import {
+﻿import {
   PlaceOrderSchema,
   CancelOrderSchema,
   CancelAllOrdersSchema,
@@ -13,7 +13,7 @@ import { isTestnetEnabled, getNetworkMode } from '../config/binance.js';
 function validateAndWarnMainnet(): string {
   const networkMode = getNetworkMode();
   if (networkMode === 'mainnet') {
-    console.warn('⚠️  WARNING: Trading on MAINNET with REAL money! Double-check your orders before confirming.');
+    console.warn('âš ï¸  WARNING: Trading on MAINNET with REAL money! Double-check your orders before confirming.');
   }
   return networkMode;
 }
@@ -206,4 +206,56 @@ export const tradingTools = [
       }
     },
   },
-];
+,
+  {
+    name: 'place_oco',
+    description: 'Place OCO (One-Cancels-Other) order with take-profit and stop-loss',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Trading pair (e.g., RENDERUSDT)' },
+        side: { type: 'string', enum: ['BUY', 'SELL'], description: 'Trade direction' },
+        quantity: { type: 'string', description: 'Quantity to trade' },
+        abovePrice: { type: 'string', description: 'Take-profit price' },
+        belowPrice: { type: 'string', description: 'Stop-loss limit price' },
+        belowStopPrice: { type: 'string', description: 'Stop-loss trigger price' },
+      },
+      required: ['symbol', 'side', 'quantity', 'abovePrice', 'belowPrice', 'belowStopPrice'],
+    },
+    handler: async (binanceClient: any, args: any) => {
+      const networkMode = validateAndWarnMainnet();
+      
+      const axios = require('axios');
+      const crypto = require('crypto');
+      
+      const timestamp = Date.now();
+      const params = {
+        symbol: args.symbol,
+        side: args.side,
+        quantity: args.quantity,
+        aboveType: 'LIMIT_MAKER',
+        abovePrice: args.abovePrice,
+        belowType: 'STOP_LOSS_LIMIT',
+        belowPrice: args.belowPrice,
+        belowStopPrice: args.belowStopPrice,
+        belowTimeInForce: 'GTC',
+        timestamp: timestamp.toString(),
+        recvWindow: "60000"
+      };
+
+      const queryString = new URLSearchParams(params).toString();
+      const signature = crypto.createHmac('sha256', process.env.BINANCE_API_SECRET).update(queryString).digest('hex');
+
+      const response = await axios.post(
+        `https://api.binance.com/api/v3/orderList/oco?${queryString}&signature=${signature}`,
+        null,
+        { headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY } }
+      );
+
+      return { ...response.data, network: networkMode };
+    },
+  }];
+
+
+
+

@@ -1,4 +1,4 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+﻿import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -48,7 +48,7 @@ export class BinanceMCPServer {
       ...futuresTools,
     ];
 
-    for (const tool of allTools) {
+    for (const tool of allTools) { if (!tool) continue;
       this.tools.set(tool.name, tool);
     }
   }
