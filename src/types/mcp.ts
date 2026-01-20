@@ -30,7 +30,11 @@ export const GetMarketSnapshotSchema = z.object({
   compact: z.boolean().optional().default(true).describe('Return trimmed summary (default true)'),
   emas: z.array(z.number()).optional().default([20,50,200]).describe('EMA periods (e.g., [20,50,200])'),
   atrPeriod: z.number().optional().default(14).describe('ATR period (e.g., 14)'),
-  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs')
+  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs'),
+  minQuality: z.number().optional().default(0.6).describe('Minimum quality score for hidden order blocks'),
+  requireLTFConfirmations: z.boolean().optional().default(false).describe('Require LTF confirmations (BOS/ChoCh/SFP/FVG mitigation) for HOBs'),
+  excludeInvalidated: z.boolean().optional().default(true).describe('Exclude HOBs marked invalidated'),
+  onlyFullyMitigated: z.boolean().optional().default(false).describe('Include only fully mitigated HOBs')
 });
 
 export const GetMarketSnapshotsSchema = z.object({
@@ -40,7 +44,11 @@ export const GetMarketSnapshotsSchema = z.object({
   compact: z.boolean().optional().default(true).describe('Return trimmed summary'),
   emas: z.array(z.number()).optional().default([20,50,200]).describe('EMA periods'),
   atrPeriod: z.number().optional().default(14).describe('ATR period'),
-  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs')
+  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs'),
+  minQuality: z.number().optional().default(0.6).describe('Minimum quality score for hidden order blocks'),
+  requireLTFConfirmations: z.boolean().optional().default(false).describe('Require LTF confirmations for HOBs'),
+  excludeInvalidated: z.boolean().optional().default(true).describe('Exclude HOBs marked invalidated'),
+  onlyFullyMitigated: z.boolean().optional().default(false).describe('Include only fully mitigated HOBs')
 });
 
 export const GetAccountInfoSchema = z.object({});

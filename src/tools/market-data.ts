@@ -276,7 +276,7 @@ export const marketDataTools = [
       required: ['symbol','interval']
     },
     handler: async (binanceClient: any, args: unknown) => {
-      const { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60 } = validateInput(GetMarketSnapshotSchema, args) as any;
+      const { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false } = validateInput(GetMarketSnapshotSchema, args) as any;
       validateSymbol(symbol);
       try {
         const klines = await binanceClient.candles({ symbol, interval, limit });
@@ -536,8 +536,16 @@ export const marketDataTools = [
           hob.components = { dispScore, wickRatio, fvgNear: !!fvgNear, liqScore, vwap: !!vwapConf, hvn: !!hvnConf, tfWeight };
         }
 
+        const filterHob = (hob: any) => {
+          const ltfOk = !requireLTFConfirmations || (hob.ltfConfirmations && (hob.ltfConfirmations.bos || hob.ltfConfirmations.choch || hob.ltfConfirmations.sfp || hob.ltfConfirmations.fvgMitigation));
+          const qualityOk = typeof hob.qualityScore === 'number' && hob.qualityScore >= minQuality;
+          const invalidationOk = !excludeInvalidated || !hob.invalidated;
+          const mitigationOk = !onlyFullyMitigated || hob.fullyMitigated;
+          return ltfOk && qualityOk && invalidationOk && mitigationOk;
+        };
+        const hobFiltered = hiddenOrderBlocks.filter(filterHob);
         const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
-        const snapshot = compact ? { symbol, interval, latest, pivots: pivots.slice(-6), bos, fvg: fvg.slice(-5), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues } : { symbol, interval, candles, pivots, bos, fvg, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues };
+        const snapshot = compact ? { symbol, interval, latest, pivots: pivots.slice(-6), bos, fvg: fvg.slice(-5), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues } : { symbol, interval, candles, pivots, bos, fvg, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues };
         return snapshot;
       } catch (error) {
         handleBinanceError(error);
@@ -562,7 +570,7 @@ export const marketDataTools = [
       required: ['symbols','interval']
     },
     handler: async (binanceClient: any, args: unknown) => {
-      const { symbols, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60 } = validateInput(GetMarketSnapshotsSchema, args) as any;
+      const { symbols, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false } = validateInput(GetMarketSnapshotsSchema, args) as any;
       const results: any[] = [];
       for (const symbol of symbols) {
         try {
@@ -641,8 +649,16 @@ export const marketDataTools = [
               }
             }
           }
+          const filterHob = (hob: any) => {
+            const ltfOk = !requireLTFConfirmations || (hob.ltfConfirmations && (hob.ltfConfirmations.bos || hob.ltfConfirmations.choch || hob.ltfConfirmations.sfp || hob.ltfConfirmations.fvgMitigation));
+            const qualityOk = typeof hob.qualityScore === 'number' && hob.qualityScore >= minQuality;
+            const invalidationOk = !excludeInvalidated || !hob.invalidated;
+            const mitigationOk = !onlyFullyMitigated || hob.fullyMitigated;
+            return ltfOk && qualityOk && invalidationOk && mitigationOk;
+          };
+          const hobFiltered = hiddenOrderBlocks.filter(filterHob);
           const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
-          results.push(compact ? { symbol, interval, latest, bos, pivots: pivots.slice(-4), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues, fvg: fvg.slice(-3) } : { symbol, interval, candles, bos, pivots, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues, fvg });
+          results.push(compact ? { symbol, interval, latest, bos, pivots: pivots.slice(-4), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues, fvg: fvg.slice(-3) } : { symbol, interval, candles, bos, pivots, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues, fvg });
         } catch (error) {
           results.push({ symbol, error: sanitizeError(error as any) });
         }
