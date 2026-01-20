@@ -276,7 +276,7 @@ export const marketDataTools = [
       required: ['symbol','interval']
     },
     handler: async (binanceClient: any, args: unknown) => {
-      const { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false } = validateInput(GetMarketSnapshotSchema, args) as any;
+      const { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false, veryStrongMinQuality = 0.75, onlyVeryStrong = false } = validateInput(GetMarketSnapshotSchema, args) as any;
       const normalizeInterval = (iv: string) => (iv === '2d' ? '1d' : iv === '4d' ? '1d' : iv === '2w' ? '1w' : iv);
       const fetchInterval = normalizeInterval(interval);
       validateSymbol(symbol);
@@ -531,11 +531,16 @@ export const marketDataTools = [
             0.1  * vwapConf +
             0.1  * hvnConf
           ) * tfWeight;
+          const confCount = (ltf.bos?1:0) + (ltf.choch?1:0) + (ltf.sfp?1:0) + (ltf.fvgMitigation?1:0);
+          const confConfluence = (vwapConf?1:0) + (hvnConf?1:0) + ((liqScore >= 0.5)?1:0) + ((fvgNear?1:0));
+          const isVeryStrong = !invalidated && (qualityScore >= veryStrongMinQuality) && (tfWeight >= 1.3) && (confCount >= 2) && (confConfluence >= 2);
           hob.invalidated = invalidated;
           hob.fullyMitigated = fullyMitigated && !invalidated;
           hob.ltfConfirmations = ltf;
           hob.qualityScore = Number(qualityScore.toFixed(3));
           hob.components = { dispScore, wickRatio, fvgNear: !!fvgNear, liqScore, vwap: !!vwapConf, hvn: !!hvnConf, tfWeight };
+          hob.isVeryStrong = isVeryStrong;
+          hob.strengthLabel = isVeryStrong ? 'very-strong' : (hob.qualityScore >= minQuality ? 'strong' : 'normal');
         }
 
         const filterHob = (hob: any) => {
@@ -543,7 +548,8 @@ export const marketDataTools = [
           const qualityOk = typeof hob.qualityScore === 'number' && hob.qualityScore >= minQuality;
           const invalidationOk = !excludeInvalidated || !hob.invalidated;
           const mitigationOk = !onlyFullyMitigated || hob.fullyMitigated;
-          return ltfOk && qualityOk && invalidationOk && mitigationOk;
+          const veryStrongOk = !onlyVeryStrong || hob.isVeryStrong === true;
+          return ltfOk && qualityOk && invalidationOk && mitigationOk && veryStrongOk;
         };
         const hobFiltered = hiddenOrderBlocks.filter(filterHob);
         const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
