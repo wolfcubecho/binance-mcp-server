@@ -435,6 +435,107 @@ export const marketDataTools = [
           if (lastLowPivot && lows[i] < lastLowPivot.price - tolerance && closes[i] > lastLowPivot.price) { sfp.bullish = true; sfp.last = { type: 'bullish', idx: i, level: lastLowPivot.price }; break; }
         }
 
+        // Enrich hiddenOrderBlocks with HTF/LTF confirmations and quality score
+        const intervalMsMap: Record<string, number> = { '1m': 60_000, '3m': 180_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '2h': 7_200_000, '4h': 14_400_000, '6h': 21_600_000, '8h': 28_800_000, '12h': 43_200_000, '1d': 86_400_000 };
+        const ltfMap: Record<string, string> = { '1d': '1h', '12h': '1h', '8h': '30m', '6h': '30m', '4h': '30m', '2h': '15m', '1h': '15m', '30m': '5m', '15m': '5m', '5m': '1m' };
+        const tfWeightMap: Record<string, number> = { '1m': 0.5, '5m': 0.7, '15m': 0.8, '30m': 0.9, '1h': 1.0, '4h': 1.1, '1d': 1.2 };
+        const intervalMs = intervalMsMap[interval] ?? 3_600_000;
+        const ltfInterval = ltfMap[interval] ?? null;
+        const volSorted = [...volumes].sort((a,b)=>a-b);
+        const vol75 = volSorted[Math.floor(volSorted.length * 0.75)] || 0;
+        const baseATR = atr ?? Math.max(1e-8, highs[highs.length - 1] - lows[lows.length - 1]);
+        const nearFvg = (type: 'bull'|'bear', obIdx: number) => fvg.some(g => g.type === type && g.startIdx >= obIdx - 2 && g.startIdx <= obIdx + 4);
+        const nearestLiquidityScore = (type: 'bull'|'bear', zoneMid: number) => {
+          const levels = type === 'bull' ? liquidityZones.lows : liquidityZones.highs;
+          let best = Infinity; for (const l of levels) { const d = Math.abs(zoneMid - l.level); if (d < best) best = d; }
+          if (!Number.isFinite(best)) return 0; const norm = best / baseATR; return Math.max(0, 1 - Math.min(1, norm));
+        };
+        const vwapConfluence = (zoneMid: number) => { if (vwap == null) return false; const diff = Math.abs(zoneMid - vwap); return (diff / baseATR) <= 0.5; };
+        const hvnConfluence = (obIdx: number) => volumes[obIdx] >= vol75;
+
+        // LTF confirmations helper
+        const computeLtfConfirmations = async (revisitTs: number, type: 'bull'|'bear') => {
+          try {
+            if (!ltfInterval) return { bos: false, choch: false, sfp: false, fvgMitigation: false };
+            const ltfLimit = 300;
+            const ltfKlines = await binanceClient.candles({ symbol, interval: ltfInterval, limit: ltfLimit });
+            const ltfCandles = ltfKlines.map((k: any) => ({ ts: k.openTime, o: parseFloat(k.open), h: parseFloat(k.high), l: parseFloat(k.low), c: parseFloat(k.close) }));
+            const windowStart = revisitTs;
+            const windowEnd = revisitTs + 3 * intervalMs;
+            const subset = ltfCandles.filter((c: { ts: number }) => c.ts >= windowStart && c.ts <= windowEnd);
+            if (subset.length < 5) return { bos: false, choch: false, sfp: false, fvgMitigation: false };
+            const highsL = subset.map((c: any)=>c.h), lowsL = subset.map((c: any)=>c.l), closesL = subset.map((c: any)=>c.c), opensL = subset.map((c: any)=>c.o);
+            // Simple BOS: break of local range in expected direction
+            const preRangeHigh = Math.max(...highsL.slice(0, Math.max(1, Math.floor(highsL.length/3))));
+            const preRangeLow = Math.min(...lowsL.slice(0, Math.max(1, Math.floor(lowsL.length/3))));
+            const bos = type === 'bull' ? (Math.max(...closesL) > preRangeHigh) : (Math.min(...closesL) < preRangeLow);
+            // ChoCh heuristic: initial sequence opposite then break in desired direction
+            const firstMoves = closesL.slice(0, 3).map((v: number, i: number)=> i>0 ? v - closesL[i-1] : 0);
+            const initialOpposite = type === 'bull' ? (firstMoves[1] < 0) : (firstMoves[1] > 0);
+            const choch = initialOpposite && bos;
+            // SFP on LTF against the pre-range extremes
+            const tol = baseATR * 0.1;
+            let sfp = false;
+            for (let i = 2; i < subset.length; i++) {
+              if (type === 'bear' && highsL[i] > preRangeHigh + tol && closesL[i] < preRangeHigh) { sfp = true; break; }
+              if (type === 'bull' && lowsL[i] < preRangeLow - tol && closesL[i] > preRangeLow) { sfp = true; break; }
+            }
+            // FVG mitigation on LTF (gap filled within window)
+            let fvgMitigation = false;
+            for (let i = 2; i < subset.length; i++) {
+              const bullGap = lowsL[i] > highsL[i-2];
+              const bearGap = highsL[i] < lowsL[i-2];
+              if (bullGap || bearGap) {
+                // Check next candles overlap prior extremes
+                const filled = (i+1 < subset.length) && (lowsL[i+1] <= highsL[i-2] || highsL[i+1] >= lowsL[i-2]);
+                if (filled) { fvgMitigation = true; break; }
+              }
+            }
+            return { bos, choch, sfp, fvgMitigation };
+          } catch { return { bos: false, choch: false, sfp: false, fvgMitigation: false }; }
+        };
+
+        for (let i = 0; i < hiddenOrderBlocks.length; i++) {
+          const hob: any = hiddenOrderBlocks[i];
+          const zoneMid = (hob.zone.open + hob.zone.close) / 2;
+          // Fully mitigated/invalidated after revisit
+          let invalidated = false; let fullyMitigated = false;
+          for (let j = hob.revisitIdx + 1; j < candles.length; j++) {
+            if (hob.type === 'bull') { if (closes[j] < Math.min(hob.zone.open, hob.zone.close)) { invalidated = true; break; } }
+            else { if (closes[j] > Math.max(hob.zone.open, hob.zone.close)) { invalidated = true; break; } }
+            // Full body close well away from core implies mitigation
+            const bodyLow = Math.min(opens[j], closes[j]); const bodyHigh = Math.max(opens[j], closes[j]);
+            if (hob.type === 'bull' && bodyLow > Math.max(hob.zone.open, hob.zone.close)) { fullyMitigated = true; }
+            if (hob.type === 'bear' && bodyHigh < Math.min(hob.zone.open, hob.zone.close)) { fullyMitigated = true; }
+          }
+          // LTF confirmations
+          const ltf = await computeLtfConfirmations(timestamps[hob.revisitIdx], hob.type);
+          // Components for scoring
+          const windowN = Math.min(5, closes.length - 1 - hob.idx);
+          const disp = windowN > 0 ? Math.abs(closes[hob.idx + windowN] - closes[hob.idx]) / baseATR : 0;
+          const dispScore = Math.min(1, disp / 2);
+          const rvIdx = hob.revisitIdx;
+          const wickRatio = hob.type === 'bull' ? Math.max(0, Math.min(1, (Math.min(hob.zone.open, hob.zone.close) - lows[rvIdx]) / Math.max(1e-8, highs[rvIdx] - lows[rvIdx]))) : Math.max(0, Math.min(1, (highs[rvIdx] - Math.max(hob.zone.open, hob.zone.close)) / Math.max(1e-8, highs[rvIdx] - lows[rvIdx])));
+          const fvgNear = nearFvg(hob.type, hob.idx) ? 1 : 0;
+          const liqScore = nearestLiquidityScore(hob.type, zoneMid);
+          const vwapConf = vwapConfluence(zoneMid) ? 1 : 0;
+          const hvnConf = hvnConfluence(hob.idx) ? 1 : 0;
+          const tfWeight = tfWeightMap[interval] ?? 1.0;
+          const qualityScore = (
+            0.35 * dispScore +
+            0.15 * wickRatio +
+            0.15 * fvgNear +
+            0.15 * liqScore +
+            0.1  * vwapConf +
+            0.1  * hvnConf
+          ) * tfWeight;
+          hob.invalidated = invalidated;
+          hob.fullyMitigated = fullyMitigated && !invalidated;
+          hob.ltfConfirmations = ltf;
+          hob.qualityScore = Number(qualityScore.toFixed(3));
+          hob.components = { dispScore, wickRatio, fvgNear: !!fvgNear, liqScore, vwap: !!vwapConf, hvn: !!hvnConf, tfWeight };
+        }
+
         const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
         const snapshot = compact ? { symbol, interval, latest, pivots: pivots.slice(-6), bos, fvg: fvg.slice(-5), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues } : { symbol, interval, candles, pivots, bos, fvg, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues };
         return snapshot;
