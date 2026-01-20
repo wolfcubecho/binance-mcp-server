@@ -7,16 +7,40 @@ export const GetPriceSchema = z.object({
 export const GetOrderBookSchema = z.object({
   symbol: z.string().describe('Trading pair symbol, as BTCUSDT doth appear'),
   limit: z.number().optional().default(100).describe('Depth limit, defaulting to a hundred entries'),
+  compact: z.boolean().optional().describe('If true, return trimmed result')
 });
 
 export const GetKlinesSchema = z.object({
   symbol: z.string().describe('Trading pair symbol, as BTCUSDT doth appear'),
   interval: z.enum(['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M']).describe('The interval of time\'s passage'),
   limit: z.number().optional().default(500).describe('Quantity limit, defaulting to five hundred'),
+  compact: z.boolean().optional().describe('If true, return trimmed candles')
 });
 
 export const Get24hrTickerSchema = z.object({
   symbol: z.string().optional().describe('Trading pair symbol, or all pairs if none be specified'),
+  compact: z.boolean().optional().describe('If true, return selected fields only')
+});
+
+// Market Snapshot Schemas (spot)
+export const GetMarketSnapshotSchema = z.object({
+  symbol: z.string().describe('Trading pair symbol (e.g., BTCUSDT)'),
+  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d']).describe('Candle interval'),
+  limit: z.number().optional().default(150).describe('Candles to analyze (default 150)'),
+  compact: z.boolean().optional().default(true).describe('Return trimmed summary (default true)'),
+  emas: z.array(z.number()).optional().default([20,50,200]).describe('EMA periods (e.g., [20,50,200])'),
+  atrPeriod: z.number().optional().default(14).describe('ATR period (e.g., 14)'),
+  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs')
+});
+
+export const GetMarketSnapshotsSchema = z.object({
+  symbols: z.array(z.string()).describe('Symbols to analyze'),
+  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d']).describe('Candle interval'),
+  limit: z.number().optional().default(150).describe('Candles to analyze (default 150)'),
+  compact: z.boolean().optional().default(true).describe('Return trimmed summary'),
+  emas: z.array(z.number()).optional().default([20,50,200]).describe('EMA periods'),
+  atrPeriod: z.number().optional().default(14).describe('ATR period'),
+  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs')
 });
 
 export const GetAccountInfoSchema = z.object({});
@@ -252,6 +276,8 @@ export type GetPriceInput = z.infer<typeof GetPriceSchema>;
 export type GetOrderBookInput = z.infer<typeof GetOrderBookSchema>;
 export type GetKlinesInput = z.infer<typeof GetKlinesSchema>;
 export type Get24hrTickerInput = z.infer<typeof Get24hrTickerSchema>;
+export type GetMarketSnapshotInput = z.infer<typeof GetMarketSnapshotSchema>;
+export type GetMarketSnapshotsInput = z.infer<typeof GetMarketSnapshotsSchema>;
 export type GetAccountInfoInput = z.infer<typeof GetAccountInfoSchema>;
 export type GetOpenOrdersInput = z.infer<typeof GetOpenOrdersSchema>;
 export type GetOrderHistoryInput = z.infer<typeof GetOrderHistorySchema>;
