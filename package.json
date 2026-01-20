@@ -12,7 +12,8 @@
     "dev": "tsx src/index.ts",
     "watch": "nodemon --exec tsx src/index.ts",
     "lint": "eslint src/**/*.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.js"
   },
   "keywords": [
     "binance",
