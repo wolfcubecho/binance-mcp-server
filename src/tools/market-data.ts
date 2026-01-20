@@ -338,11 +338,54 @@ export const marketDataTools = [
         const clusterLevels = (points: Array<{ idx: number; price: number }>) => { const sorted = points.slice().sort((a,b)=>a.price-b.price); const clusters: Array<{ level: number; count: number; indices: number[] }> = []; for (const pt of sorted) { const last = clusters[clusters.length - 1]; if (last && Math.abs(pt.price - last.level) <= tolerance) { const newCount = last.count + 1; const newLevel = (last.level * last.count + pt.price) / newCount; last.level = newLevel; last.count = newCount; last.indices.push(pt.idx); } else { clusters.push({ level: pt.price, count: 1, indices: [pt.idx] }); } } return clusters.filter(c => c.count >= 2); };
         const liquidityZones = { highs: clusterLevels(pivotHighs.map(ph => ({ idx: ph.idx, price: ph.price }))), lows: clusterLevels(pivotLows.map(pl => ({ idx: pl.idx, price: pl.price }))) };
 
-        // Order Blocks (BOS context)
+        // Order Blocks (BOS context with sensible fallbacks)
         const orderBlocks: Array<{ type: 'bull'|'bear'; idx: number; open: number; high: number; low: number; close: number }> = [];
         const lookbackOB = Math.min(candles.length - 1, 60);
-        if (bos === 'up') { for (let i = candles.length - 3; i >= candles.length - lookbackOB; i--) { if (opens[i] > closes[i]) { const upMomentum = (closes[i+1] > closes[i]) && (closes[i+2] >= closes[i+1]); const brokeHigh = lastClose > prevHigh; if (upMomentum || brokeHigh) { orderBlocks.push({ type: 'bull', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } } } }
-        else if (bos === 'down') { for (let i = candles.length - 3; i >= candles.length - lookbackOB; i--) { if (opens[i] < closes[i]) { const downMomentum = (closes[i+1] < closes[i]) && (closes[i+2] <= closes[i+1]); const brokeLow = lastClose < prevLow; if (downMomentum || brokeLow) { orderBlocks.push({ type: 'bear', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } } } }
+        if (bos === 'up') {
+          for (let i = candles.length - 3; i >= candles.length - lookbackOB; i--) {
+            if (opens[i] > closes[i]) {
+              const upMomentum = (closes[i+1] > closes[i]) && (closes[i+2] >= closes[i+1]);
+              const brokeHigh = lastClose > prevHigh;
+              if (upMomentum || brokeHigh) { orderBlocks.push({ type: 'bull', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; }
+            }
+          }
+        } else if (bos === 'down') {
+          for (let i = candles.length - 3; i >= candles.length - lookbackOB; i--) {
+            if (opens[i] < closes[i]) {
+              const downMomentum = (closes[i+1] < closes[i]) && (closes[i+2] <= closes[i+1]);
+              const brokeLow = lastClose < prevLow;
+              if (downMomentum || brokeLow) { orderBlocks.push({ type: 'bear', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; }
+            }
+          }
+        }
+
+        // Fallback OB when no BOS detected: use displacement or last pivots
+        if (orderBlocks.length === 0) {
+          const windowN = Math.min(5, closes.length - 1);
+          const displacementUp = closes[closes.length - 1] - closes[closes.length - 1 - windowN];
+          const displacementDown = closes[closes.length - 1 - windowN] - closes[closes.length - 1];
+          const base = atr ?? Math.max(1e-8, highs[highs.length - 1] - lows[lows.length - 1]);
+          const threshold = base * 0.8;
+          if (displacementUp > threshold) {
+            for (let i = candles.length - 2; i >= Math.max(1, candles.length - 1 - lookbackOB); i--) {
+              if (opens[i] > closes[i]) { orderBlocks.push({ type: 'bull', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; }
+            }
+          } else if (displacementDown > threshold) {
+            for (let i = candles.length - 2; i >= Math.max(1, candles.length - 1 - lookbackOB); i--) {
+              if (opens[i] < closes[i]) { orderBlocks.push({ type: 'bear', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; }
+            }
+          }
+        }
+        if (orderBlocks.length === 0) {
+          const lastH = [...pivots].reverse().find(p => p.type === 'H');
+          const lastL = [...pivots].reverse().find(p => p.type === 'L');
+          if (lastH) {
+            for (let i = lastH.idx - 1; i >= Math.max(0, lastH.idx - 10); i--) { if (opens[i] > closes[i]) { orderBlocks.push({ type: 'bull', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } }
+          }
+          if (orderBlocks.length === 0 && lastL) {
+            for (let i = lastL.idx - 1; i >= Math.max(0, lastL.idx - 10); i--) { if (opens[i] < closes[i]) { orderBlocks.push({ type: 'bear', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } }
+          }
+        }
 
         // VWAP (window)
         let vwap: number | null = null; if (candles.length > 0) { let tpVolSum = 0, volSum = 0; for (let i = 0; i < candles.length; i++) { const tp = (highs[i] + lows[i] + closes[i]) / 3; const v = volumes[i] || 0; tpVolSum += tp * v; volSum += v; } vwap = volSum > 0 ? tpVolSum / volSum : null; }
@@ -417,6 +460,21 @@ export const marketDataTools = [
           const lookbackOB = Math.min(candles.length - 1, 60);
           if (bos === 'up') { for (let i = candles.length - 3; i >= candles.length - lookbackOB; i--) { if (opens[i] > closes[i]) { const upMomentum = (closes[i+1] > closes[i]) && (closes[i+2] >= closes[i+1]); const brokeHigh = lastClose > prevHigh; if (upMomentum || brokeHigh) { orderBlocks.push({ type: 'bull', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } } } }
           else if (bos === 'down') { for (let i = candles.length - 3; i >= candles.length - lookbackOB; i--) { if (opens[i] < closes[i]) { const downMomentum = (closes[i+1] < closes[i]) && (closes[i+2] <= closes[i+1]); const brokeLow = lastClose < prevLow; if (downMomentum || brokeLow) { orderBlocks.push({ type: 'bear', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } } } }
+          if (orderBlocks.length === 0) {
+            const windowN = Math.min(5, closes.length - 1);
+            const displacementUp = closes[closes.length - 1] - closes[closes.length - 1 - windowN];
+            const displacementDown = closes[closes.length - 1 - windowN] - closes[closes.length - 1];
+            const base = atr ?? Math.max(1e-8, highs[highs.length - 1] - lows[lows.length - 1]);
+            const threshold = base * 0.8;
+            if (displacementUp > threshold) { for (let i = candles.length - 2; i >= Math.max(1, candles.length - 1 - lookbackOB); i--) { if (opens[i] > closes[i]) { orderBlocks.push({ type: 'bull', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } } }
+            else if (displacementDown > threshold) { for (let i = candles.length - 2; i >= Math.max(1, candles.length - 1 - lookbackOB); i--) { if (opens[i] < closes[i]) { orderBlocks.push({ type: 'bear', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } } }
+          }
+          if (orderBlocks.length === 0) {
+            const lastH = [...pivots].reverse().find(p => p.type === 'H');
+            const lastL = [...pivots].reverse().find(p => p.type === 'L');
+            if (lastH) { for (let i = lastH.idx - 1; i >= Math.max(0, lastH.idx - 10); i--) { if (opens[i] > closes[i]) { orderBlocks.push({ type: 'bull', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } } }
+            if (orderBlocks.length === 0 && lastL) { for (let i = lastL.idx - 1; i >= Math.max(0, lastL.idx - 10); i--) { if (opens[i] < closes[i]) { orderBlocks.push({ type: 'bear', idx: i, open: opens[i], high: highs[i], low: lows[i], close: closes[i] }); break; } } }
+          }
           let vwap: number | null = null; if (candles.length > 0) { let tpVolSum = 0, volSum = 0; for (let i = 0; i < candles.length; i++) { const tp = (highs[i] + lows[i] + closes[i]) / 3; const v = volumes[i] || 0; tpVolSum += tp * v; volSum += v; } vwap = volSum > 0 ? tpVolSum / volSum : null; }
           const startOfUTC = (ts: number) => Date.UTC(new Date(ts).getUTCFullYear(), new Date(ts).getUTCMonth(), new Date(ts).getUTCDate()); const now = timestamps[timestamps.length - 1]; const todayStart = startOfUTC(now); const yesterdayStart = todayStart - 24*60*60*1000; const utcDay = new Date(now).getUTCDay(); const daysSinceMonday = (utcDay + 6) % 7; const weekStart = todayStart - daysSinceMonday * 24*60*60*1000;
           let dailyOpen: number | null = null; let weeklyOpen: number | null = null; let prevDayHigh: number | null = null; let prevDayLow: number | null = null;
