@@ -281,3 +281,26 @@ npm run build    # Compileth TypeScript unto JavaScript
 npm run dev      # Development mode, for thy testing
 npm run lint     # Runneth linting, to ensure code quality most fine
 ```
+
+### Hidden Order Blocks (Quality Filters)
+
+The snapshot tools enrich results with `hiddenOrderBlocks` including mitigation flags, LTF confirmations, and a `qualityScore`. You can filter server-side via these inputs:
+
+- Parameters:
+  - minQuality: Minimum quality score (default 0.6)
+  - requireLTFConfirmations: Require BOS/ChoCh/SFP/FVG mitigation on LTF (default false)
+  - excludeInvalidated: Exclude HOBs marked `invalidated` (default true)
+  - onlyFullyMitigated: Include only HOBs with `fullyMitigated=true` (default false)
+
+- Example (Claude CLI):
+```powershell
+claude call get_market_snapshot --args '{
+  "symbol":"BTCUSDT","interval":"1h",
+  "limit":150,"compact":true,"emas":[20,50,200],"atrPeriod":14,"fvgLookback":60,
+  "minQuality":0.7,
+  "requireLTFConfirmations":true,
+  "excludeInvalidated":true
+}'
+```
+
+Tip: If new parameters are not visible, restart Claude Desktop or toggle MCP servers to refresh tool schemas.
