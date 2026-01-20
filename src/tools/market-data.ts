@@ -8,7 +8,7 @@ import {
 } from '../types/mcp.js';
 import { validateInput, validateSymbol } from '../utils/validation.js';
 import { handleBinanceError, sanitizeError } from '../utils/error-handling.js';
-import { logHOBs, logNote } from '../utils/telemetry.js';
+import { logHOBs, logNote, logSnapshot } from '../utils/telemetry.js';
 
 // Simple in-memory cache with TTL
 const BINANCE_CACHE_TTL_MS = parseInt(process.env.BINANCE_CACHE_TTL || '10000', 10);
@@ -569,7 +569,38 @@ export const marketDataTools = [
         const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
         const snapshot = compact ? { symbol, interval, latest, pivots: pivots.slice(-6), bos, fvg: fvg.slice(-5), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues } : { symbol, interval, candles, pivots, bos, fvg, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues };
         if (telemetry) {
-          try { logHOBs(symbol, interval, latest?.close, hobFiltered); } catch {}
+          try {
+            logHOBs(symbol, interval, latest?.close, hobFiltered);
+            const numPivotHighs = pivots.filter(p=>p.type==='H').length;
+            const numPivotLows = pivots.filter(p=>p.type==='L').length;
+            const bullFvgCount = fvg.filter(g=>g.type==='bull').length;
+            const bearFvgCount = fvg.filter(g=>g.type==='bear').length;
+            const highsClusterCount = Array.isArray(liquidityZones?.highs) ? liquidityZones.highs.length : 0;
+            const lowsClusterCount = Array.isArray(liquidityZones?.lows) ? liquidityZones.lows.length : 0;
+            const hobCount = hobFiltered.length;
+            const veryStrongCount = hobFiltered.filter((h:any)=>h.isVeryStrong).length;
+            const avgHobQuality = hobCount ? (hobFiltered.reduce((s:any,h:any)=>s+(h.qualityScore||0),0)/hobCount) : 0;
+            const maxHobQuality = hobCount ? Math.max(...hobFiltered.map((h:any)=>h.qualityScore||0)) : 0;
+            logSnapshot(symbol, interval, latest?.close, {
+              bos,
+              trend,
+              rsi,
+              atr,
+              vwapPresent: vwap!=null,
+              numPivotHighs,
+              numPivotLows,
+              bullFvgCount,
+              bearFvgCount,
+              highsClusterCount,
+              lowsClusterCount,
+              orderBlocksCount: orderBlocks.length,
+              hiddenOrderBlocksCount: hobCount,
+              hiddenOrderBlocksVeryStrongCount: veryStrongCount,
+              avgHobQuality,
+              maxHobQuality,
+              sfp,
+            });
+          } catch {}
         }
         return snapshot;
       } catch (error) {
@@ -684,7 +715,40 @@ export const marketDataTools = [
           };
           const hobFiltered = hiddenOrderBlocks.filter(filterHob);
           const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
-          if (telemetry) { try { logHOBs(symbol, interval, latest?.close, hobFiltered); } catch {} }
+          if (telemetry) {
+            try {
+              logHOBs(symbol, interval, latest?.close, hobFiltered);
+              const numPivotHighs = pivots.filter(p=>p.type==='H').length;
+              const numPivotLows = pivots.filter(p=>p.type==='L').length;
+              const bullFvgCount = fvg.filter(g=>g.type==='bull').length;
+              const bearFvgCount = fvg.filter(g=>g.type==='bear').length;
+              const highsClusterCount = Array.isArray(liquidityZones?.highs) ? liquidityZones.highs.length : 0;
+              const lowsClusterCount = Array.isArray(liquidityZones?.lows) ? liquidityZones.lows.length : 0;
+              const hobCount = hobFiltered.length;
+              const veryStrongCount = hobFiltered.filter((h:any)=>h.isVeryStrong).length;
+              const avgHobQuality = hobCount ? (hobFiltered.reduce((s:any,h:any)=>s+(h.qualityScore||0),0)/hobCount) : 0;
+              const maxHobQuality = hobCount ? Math.max(...hobFiltered.map((h:any)=>h.qualityScore||0)) : 0;
+              logSnapshot(symbol, interval, latest?.close, {
+                bos,
+                trend,
+                rsi,
+                atr,
+                vwapPresent: vwap!=null,
+                numPivotHighs,
+                numPivotLows,
+                bullFvgCount,
+                bearFvgCount,
+                highsClusterCount,
+                lowsClusterCount,
+                orderBlocksCount: orderBlocks.length,
+                hiddenOrderBlocksCount: hobCount,
+                hiddenOrderBlocksVeryStrongCount: veryStrongCount,
+                avgHobQuality,
+                maxHobQuality,
+                sfp,
+              });
+            } catch {}
+          }
           results.push(compact ? { symbol, interval, latest, bos, pivots: pivots.slice(-4), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues, fvg: fvg.slice(-3) } : { symbol, interval, candles, bos, pivots, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues, fvg });
         } catch (error) {
           results.push({ symbol, error: sanitizeError(error as any) });
