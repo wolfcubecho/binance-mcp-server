@@ -37,6 +37,7 @@ export const GetMarketSnapshotSchema = z.object({
   onlyFullyMitigated: z.boolean().optional().default(false).describe('Include only fully mitigated HOBs'),
   veryStrongMinQuality: z.number().optional().default(0.75).describe('Quality threshold to flag very-strong setups'),
   onlyVeryStrong: z.boolean().optional().default(false).describe('Filter to return only very-strong setups')
+  ,telemetry: z.boolean().optional().default(false).describe('If true, log HOBs to data/telemetry.jsonl for learning')
 });
 
 export const GetMarketSnapshotsSchema = z.object({
@@ -53,6 +54,7 @@ export const GetMarketSnapshotsSchema = z.object({
   onlyFullyMitigated: z.boolean().optional().default(false).describe('Include only fully mitigated HOBs'),
   veryStrongMinQuality: z.number().optional().default(0.75).describe('Quality threshold to flag very-strong setups'),
   onlyVeryStrong: z.boolean().optional().default(false).describe('Filter to return only very-strong setups')
+  ,telemetry: z.boolean().optional().default(false).describe('If true, log HOBs to data/telemetry.jsonl for learning')
 });
 
 export const GetAccountInfoSchema = z.object({});

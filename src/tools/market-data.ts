@@ -8,6 +8,7 @@ import {
 } from '../types/mcp.js';
 import { validateInput, validateSymbol } from '../utils/validation.js';
 import { handleBinanceError, sanitizeError } from '../utils/error-handling.js';
+import { logHOBs, logNote } from '../utils/telemetry.js';
 
 // Simple in-memory cache with TTL
 const BINANCE_CACHE_TTL_MS = parseInt(process.env.BINANCE_CACHE_TTL || '10000', 10);
@@ -276,7 +277,7 @@ export const marketDataTools = [
       required: ['symbol','interval']
     },
     handler: async (binanceClient: any, args: unknown) => {
-      const { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false, veryStrongMinQuality = 0.75, onlyVeryStrong = false } = validateInput(GetMarketSnapshotSchema, args) as any;
+      const { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false, veryStrongMinQuality = 0.75, onlyVeryStrong = false, telemetry = false } = validateInput(GetMarketSnapshotSchema, args) as any;
       const normalizeInterval = (iv: string) => (iv === '2d' ? '1d' : iv === '4d' ? '1d' : iv === '2w' ? '1w' : iv);
       const fetchInterval = normalizeInterval(interval);
       validateSymbol(symbol);
@@ -567,6 +568,9 @@ export const marketDataTools = [
         const hobFiltered = hiddenOrderBlocks.filter(filterHob);
         const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
         const snapshot = compact ? { symbol, interval, latest, pivots: pivots.slice(-6), bos, fvg: fvg.slice(-5), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues } : { symbol, interval, candles, pivots, bos, fvg, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues };
+        if (telemetry) {
+          try { logHOBs(symbol, interval, latest?.close, hobFiltered); } catch {}
+        }
         return snapshot;
       } catch (error) {
         handleBinanceError(error);
@@ -591,7 +595,7 @@ export const marketDataTools = [
       required: ['symbols','interval']
     },
     handler: async (binanceClient: any, args: unknown) => {
-      const { symbols, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false } = validateInput(GetMarketSnapshotsSchema, args) as any;
+      const { symbols, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false, telemetry = false } = validateInput(GetMarketSnapshotsSchema, args) as any;
       const normalizeInterval = (iv: string) => (iv === '2d' ? '1d' : iv === '4d' ? '1d' : iv === '2w' ? '1w' : iv);
       const results: any[] = [];
       for (const symbol of symbols) {
@@ -680,6 +684,7 @@ export const marketDataTools = [
           };
           const hobFiltered = hiddenOrderBlocks.filter(filterHob);
           const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
+          if (telemetry) { try { logHOBs(symbol, interval, latest?.close, hobFiltered); } catch {} }
           results.push(compact ? { symbol, interval, latest, bos, pivots: pivots.slice(-4), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues, fvg: fvg.slice(-3) } : { symbol, interval, candles, bos, pivots, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues, fvg });
         } catch (error) {
           results.push({ symbol, error: sanitizeError(error as any) });
