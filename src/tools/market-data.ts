@@ -387,6 +387,58 @@ export const marketDataTools = [
           }
         }
 
+        // Hidden Order Blocks (HTF impulse + last opposing candle with sweep/FVG)
+        const hiddenOrderBlocks: Array<{ type: 'bull'|'bear'; idx: number; zone: { open: number; close: number; high: number; low: number }; displacementScore: number; wickSweep: boolean; fvgConfluence: boolean; unmitigated: boolean }> = [];
+        {
+          const windowN = Math.min(5, closes.length - 1);
+          const base = atr ?? Math.max(1e-8, highs[highs.length - 1] - lows[lows.length - 1]);
+          const dispUp = closes[closes.length - 1] - closes[closes.length - 1 - windowN];
+          const dispDown = closes[closes.length - 1 - windowN] - closes[closes.length - 1];
+          const threshold = base * 1.0;
+          const lastHighPivot = [...pivots].reverse().find(p => p.type === 'H');
+          const lastLowPivot = [...pivots].reverse().find(p => p.type === 'L');
+          const findUnmitigated = (startIdx: number, zoneLow: number, zoneHigh: number): boolean => {
+            for (let i = startIdx + 1; i < candles.length; i++) {
+              const bodyLow = Math.min(opens[i], closes[i]);
+              const bodyHigh = Math.max(opens[i], closes[i]);
+              if (bodyHigh >= zoneLow && bodyLow <= zoneHigh) return false;
+            }
+            return true;
+          };
+          if (dispUp > threshold) {
+            // Find last bearish candle before impulse start
+            const startIdx = closes.length - 1 - windowN;
+            let obIdx: number | null = null;
+            for (let i = startIdx; i >= Math.max(1, startIdx - 20); i--) {
+              if (opens[i] > closes[i]) { obIdx = i; break; }
+            }
+            if (obIdx !== null) {
+              const wickSweep = !!(lastLowPivot && lows[obIdx] < (lastLowPivot.price - (atr ? atr * 0.1 : 0)));
+              // FVG confluence shortly after impulse
+              const fvgConfluence = fvg.some(g => g.type === 'bull' && g.startIdx >= startIdx - 2 && g.startIdx <= startIdx + 4);
+              const displacementScore = dispUp / base;
+              const zone = { open: opens[obIdx], close: closes[obIdx], high: highs[obIdx], low: lows[obIdx] };
+              const unmitigated = findUnmitigated(obIdx, Math.min(zone.open, zone.close), Math.max(zone.open, zone.close));
+              hiddenOrderBlocks.push({ type: 'bull', idx: obIdx, zone, displacementScore, wickSweep, fvgConfluence, unmitigated });
+            }
+          } else if (dispDown > threshold) {
+            // Find last bullish candle before impulse start
+            const startIdx = closes.length - 1 - windowN;
+            let obIdx: number | null = null;
+            for (let i = startIdx; i >= Math.max(1, startIdx - 20); i--) {
+              if (opens[i] < closes[i]) { obIdx = i; break; }
+            }
+            if (obIdx !== null) {
+              const wickSweep = !!(lastHighPivot && highs[obIdx] > (lastHighPivot.price + (atr ? atr * 0.1 : 0)));
+              const fvgConfluence = fvg.some(g => g.type === 'bear' && g.startIdx >= startIdx - 2 && g.startIdx <= startIdx + 4);
+              const displacementScore = dispDown / base;
+              const zone = { open: opens[obIdx], close: closes[obIdx], high: highs[obIdx], low: lows[obIdx] };
+              const unmitigated = findUnmitigated(obIdx, Math.min(zone.open, zone.close), Math.max(zone.open, zone.close));
+              hiddenOrderBlocks.push({ type: 'bear', idx: obIdx, zone, displacementScore, wickSweep, fvgConfluence, unmitigated });
+            }
+          }
+        }
+
         // VWAP (window)
         let vwap: number | null = null; if (candles.length > 0) { let tpVolSum = 0, volSum = 0; for (let i = 0; i < candles.length; i++) { const tp = (highs[i] + lows[i] + closes[i]) / 3; const v = volumes[i] || 0; tpVolSum += tp * v; volSum += v; } vwap = volSum > 0 ? tpVolSum / volSum : null; }
 
@@ -408,7 +460,7 @@ export const marketDataTools = [
         }
 
         const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
-        const snapshot = compact ? { symbol, interval, latest, pivots: pivots.slice(-6), bos, fvg: fvg.slice(-5), trend, sma50, sma200, atr, rsi, orderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues } : { symbol, interval, candles, pivots, bos, fvg, trend, sma50, sma200, atr, rsi, orderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues };
+        const snapshot = compact ? { symbol, interval, latest, pivots: pivots.slice(-6), bos, fvg: fvg.slice(-5), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues } : { symbol, interval, candles, pivots, bos, fvg, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues };
         return snapshot;
       } catch (error) {
         handleBinanceError(error);
@@ -485,8 +537,50 @@ export const marketDataTools = [
           let sfp: { bullish: boolean; bearish: boolean; last?: { type: 'bullish'|'bearish'; idx: number; level: number } } = { bullish: false, bearish: false };
           const checkRange = Math.min(candles.length - 1, 10);
           for (let i = candles.length - checkRange; i < candles.length; i++) { if (lastHighPivot && highs[i] > lastHighPivot.price + tolerance && closes[i] < lastHighPivot.price) { sfp.bearish = true; sfp.last = { type: 'bearish', idx: i, level: lastHighPivot.price }; break; } if (lastLowPivot && lows[i] < lastLowPivot.price - tolerance && closes[i] > lastLowPivot.price) { sfp.bullish = true; sfp.last = { type: 'bullish', idx: i, level: lastLowPivot.price }; break; } }
+          // Hidden Order Blocks (same logic as single snapshot)
+          const hiddenOrderBlocks: Array<{ type: 'bull'|'bear'; idx: number; zone: { open: number; close: number; high: number; low: number }; displacementScore: number; wickSweep: boolean; fvgConfluence: boolean; unmitigated: boolean }> = [];
+          {
+            const windowN = Math.min(5, closes.length - 1);
+            const base = atr ?? Math.max(1e-8, highs[highs.length - 1] - lows[lows.length - 1]);
+            const dispUp = closes[closes.length - 1] - closes[closes.length - 1 - windowN];
+            const dispDown = closes[closes.length - 1 - windowN] - closes[closes.length - 1];
+            const threshold = base * 1.0;
+            const lastHighPivot = [...pivots].reverse().find(p => p.type === 'H');
+            const lastLowPivot = [...pivots].reverse().find(p => p.type === 'L');
+            const findUnmitigated = (startIdx: number, zoneLow: number, zoneHigh: number): boolean => {
+              for (let i = startIdx + 1; i < candles.length; i++) {
+                const bodyLow = Math.min(opens[i], closes[i]);
+                const bodyHigh = Math.max(opens[i], closes[i]);
+                if (bodyHigh >= zoneLow && bodyLow <= zoneHigh) return false;
+              }
+              return true;
+            };
+            if (dispUp > threshold) {
+              const startIdx = closes.length - 1 - windowN; let obIdx: number | null = null;
+              for (let i = startIdx; i >= Math.max(1, startIdx - 20); i--) { if (opens[i] > closes[i]) { obIdx = i; break; } }
+              if (obIdx !== null) {
+                const wickSweep = !!(lastLowPivot && lows[obIdx] < (lastLowPivot.price - (atr ? atr * 0.1 : 0)));
+                const fvgConfluence = fvg.some(g => g.type === 'bull' && g.startIdx >= startIdx - 2 && g.startIdx <= startIdx + 4);
+                const displacementScore = dispUp / base;
+                const zone = { open: opens[obIdx], close: closes[obIdx], high: highs[obIdx], low: lows[obIdx] };
+                const unmitigated = findUnmitigated(obIdx, Math.min(zone.open, zone.close), Math.max(zone.open, zone.close));
+                hiddenOrderBlocks.push({ type: 'bull', idx: obIdx, zone, displacementScore, wickSweep, fvgConfluence, unmitigated });
+              }
+            } else if (dispDown > threshold) {
+              const startIdx = closes.length - 1 - windowN; let obIdx: number | null = null;
+              for (let i = startIdx; i >= Math.max(1, startIdx - 20); i--) { if (opens[i] < closes[i]) { obIdx = i; break; } }
+              if (obIdx !== null) {
+                const wickSweep = !!(lastHighPivot && highs[obIdx] > (lastHighPivot.price + (atr ? atr * 0.1 : 0)));
+                const fvgConfluence = fvg.some(g => g.type === 'bear' && g.startIdx >= startIdx - 2 && g.startIdx <= startIdx + 4);
+                const displacementScore = dispDown / base;
+                const zone = { open: opens[obIdx], close: closes[obIdx], high: highs[obIdx], low: lows[obIdx] };
+                const unmitigated = findUnmitigated(obIdx, Math.min(zone.open, zone.close), Math.max(zone.open, zone.close));
+                hiddenOrderBlocks.push({ type: 'bear', idx: obIdx, zone, displacementScore, wickSweep, fvgConfluence, unmitigated });
+              }
+            }
+          }
           const latest = { close: lastClose, high: highs[highs.length-1], low: lows[lows.length-1], ts: timestamps[timestamps.length-1] };
-          results.push(compact ? { symbol, interval, latest, bos, pivots: pivots.slice(-4), trend, sma50, sma200, atr, rsi, orderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues, fvg: fvg.slice(-3) } : { symbol, interval, candles, bos, pivots, trend, sma50, sma200, atr, rsi, orderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues, fvg });
+          results.push(compact ? { symbol, interval, latest, bos, pivots: pivots.slice(-4), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues, fvg: fvg.slice(-3) } : { symbol, interval, candles, bos, pivots, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues, fvg });
         } catch (error) {
           results.push({ symbol, error: sanitizeError(error as any) });
         }
