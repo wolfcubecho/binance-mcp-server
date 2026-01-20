@@ -7,7 +7,7 @@ import {
   GetMarketSnapshotsSchema,
 } from '../types/mcp.js';
 import { validateInput, validateSymbol } from '../utils/validation.js';
-import { handleBinanceError } from '../utils/error-handling.js';
+import { handleBinanceError, sanitizeError } from '../utils/error-handling.js';
 
 // Simple in-memory cache with TTL
 const BINANCE_CACHE_TTL_MS = parseInt(process.env.BINANCE_CACHE_TTL || '10000', 10);
@@ -101,17 +101,17 @@ export const marketDataTools = [
       try {
         const orderBook = await binanceClient.book({
           symbol: input.symbol,
-          limit: input.limit,
+          limit: input.limit ?? 100,
         });
 
         const result = {
           symbol: input.symbol,
           lastUpdateId: orderBook.lastUpdateId,
-          bids: (input.compact ? orderBook.bids.slice(0, Math.min(20, input.limit)) : orderBook.bids.slice(0, input.limit)).map((bid: any) => ({
+          bids: (input.compact ? orderBook.bids.slice(0, Math.min(20, input.limit ?? 100)) : orderBook.bids.slice(0, input.limit ?? 100)).map((bid: any) => ({
             price: bid.price,
             quantity: bid.quantity,
           })),
-          asks: (input.compact ? orderBook.asks.slice(0, Math.min(20, input.limit)) : orderBook.asks.slice(0, input.limit)).map((ask: any) => ({
+          asks: (input.compact ? orderBook.asks.slice(0, Math.min(20, input.limit ?? 100)) : orderBook.asks.slice(0, input.limit ?? 100)).map((ask: any) => ({
             price: ask.price,
             quantity: ask.quantity,
           })),
@@ -280,7 +280,7 @@ export const marketDataTools = [
       validateSymbol(symbol);
       try {
         const klines = await binanceClient.candles({ symbol, interval, limit });
-        const candles = klines.map((k: any) => ({
+        const candles: Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> = klines.map((k: any) => ({
           timestamp: k.openTime,
           open: parseFloat(k.open),
           high: parseFloat(k.high),
@@ -395,7 +395,7 @@ export const marketDataTools = [
       for (const symbol of symbols) {
         try {
           const klines = await binanceClient.candles({ symbol, interval, limit });
-          const candles = klines.map((k: any) => ({ timestamp: k.openTime, open: parseFloat(k.open), high: parseFloat(k.high), low: parseFloat(k.low), close: parseFloat(k.close), volume: parseFloat(k.volume) }));
+          const candles: Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> = klines.map((k: any) => ({ timestamp: k.openTime, open: parseFloat(k.open), high: parseFloat(k.high), low: parseFloat(k.low), close: parseFloat(k.close), volume: parseFloat(k.volume) }));
           if (!candles.length) { results.push({ symbol, error: 'no_candles' }); continue; }
           const closes = candles.map(c => c.close), highs = candles.map(c => c.high), lows = candles.map(c => c.low), opens = candles.map(c => c.open), volumes = candles.map(c => c.volume), timestamps = candles.map(c => c.timestamp);
           const lastClose = closes[closes.length - 1], prevHigh = Math.max(...highs.slice(0, highs.length - 1)), prevLow = Math.min(...lows.slice(0, lows.length - 1));
