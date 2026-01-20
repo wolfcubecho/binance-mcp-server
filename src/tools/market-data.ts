@@ -266,7 +266,7 @@ export const marketDataTools = [
       type: 'object',
       properties: {
         symbol: { type: 'string', description: 'Trading pair symbol (e.g., BTCUSDT)' },
-        interval: { type: 'string', enum: ['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d'], description: 'Interval to analyze' },
+        interval: { type: 'string', enum: ['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','2d','4d','1w','2w'], description: 'Interval to analyze' },
         limit: { type: 'number', description: 'Candles to analyze (default 150)' },
         compact: { type: 'boolean', description: 'Return trimmed summary (default true)' },
         emas: { type: 'array', items: { type: 'number' }, description: 'EMA periods (e.g., [20,50,200])' },
@@ -277,9 +277,11 @@ export const marketDataTools = [
     },
     handler: async (binanceClient: any, args: unknown) => {
       const { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false } = validateInput(GetMarketSnapshotSchema, args) as any;
+      const normalizeInterval = (iv: string) => (iv === '2d' ? '1d' : iv === '4d' ? '1d' : iv === '2w' ? '1w' : iv);
+      const fetchInterval = normalizeInterval(interval);
       validateSymbol(symbol);
       try {
-        const klines = await binanceClient.candles({ symbol, interval, limit });
+        const klines = await binanceClient.candles({ symbol, interval: fetchInterval, limit });
         const candles: Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> = klines.map((k: any) => ({
           timestamp: k.openTime,
           open: parseFloat(k.open),
@@ -436,9 +438,9 @@ export const marketDataTools = [
         }
 
         // Enrich hiddenOrderBlocks with HTF/LTF confirmations and quality score
-        const intervalMsMap: Record<string, number> = { '1m': 60_000, '3m': 180_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '2h': 7_200_000, '4h': 14_400_000, '6h': 21_600_000, '8h': 28_800_000, '12h': 43_200_000, '1d': 86_400_000 };
-        const ltfMap: Record<string, string> = { '1d': '1h', '12h': '1h', '8h': '30m', '6h': '30m', '4h': '30m', '2h': '15m', '1h': '15m', '30m': '5m', '15m': '5m', '5m': '1m' };
-        const tfWeightMap: Record<string, number> = { '1m': 0.5, '5m': 0.7, '15m': 0.8, '30m': 0.9, '1h': 1.0, '4h': 1.1, '1d': 1.2 };
+        const intervalMsMap: Record<string, number> = { '1m': 60_000, '3m': 180_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1h': 3_600_000, '2h': 7_200_000, '4h': 14_400_000, '6h': 21_600_000, '8h': 28_800_000, '12h': 43_200_000, '1d': 86_400_000, '2d': 172_800_000, '4d': 345_600_000, '1w': 604_800_000, '2w': 1_209_600_000 };
+        const ltfMap: Record<string, string> = { '2w': '1d', '1w': '4h', '4d': '1h', '2d': '30m', '1d': '1h', '12h': '1h', '8h': '30m', '6h': '30m', '4h': '30m', '2h': '15m', '1h': '15m', '30m': '5m', '15m': '5m', '5m': '1m' };
+        const tfWeightMap: Record<string, number> = { '1m': 0.5, '5m': 0.7, '15m': 0.8, '30m': 0.9, '1h': 1.0, '4h': 1.1, '1d': 1.2, '2d': 1.25, '4d': 1.3, '1w': 1.35, '2w': 1.4 };
         const intervalMs = intervalMsMap[interval] ?? 3_600_000;
         const ltfInterval = ltfMap[interval] ?? null;
         const volSorted = [...volumes].sort((a,b)=>a-b);
@@ -560,7 +562,7 @@ export const marketDataTools = [
       type: 'object',
       properties: {
         symbols: { type: 'array', items: { type: 'string' }, description: 'Symbols to analyze' },
-        interval: { type: 'string', enum: ['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d'], description: 'Interval to analyze' },
+        interval: { type: 'string', enum: ['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','2d','4d','1w','2w'], description: 'Interval to analyze' },
         limit: { type: 'number', description: 'Candles to analyze (default 150)' },
         compact: { type: 'boolean', description: 'Trim results' },
         emas: { type: 'array', items: { type: 'number' }, description: 'EMA periods' },
@@ -571,10 +573,11 @@ export const marketDataTools = [
     },
     handler: async (binanceClient: any, args: unknown) => {
       const { symbols, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false } = validateInput(GetMarketSnapshotsSchema, args) as any;
+      const normalizeInterval = (iv: string) => (iv === '2d' ? '1d' : iv === '4d' ? '1d' : iv === '2w' ? '1w' : iv);
       const results: any[] = [];
       for (const symbol of symbols) {
         try {
-          const klines = await binanceClient.candles({ symbol, interval, limit });
+          const klines = await binanceClient.candles({ symbol, interval: normalizeInterval(interval), limit });
           const candles: Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> = klines.map((k: any) => ({ timestamp: k.openTime, open: parseFloat(k.open), high: parseFloat(k.high), low: parseFloat(k.low), close: parseFloat(k.close), volume: parseFloat(k.volume) }));
           if (!candles.length) { results.push({ symbol, error: 'no_candles' }); continue; }
           const closes = candles.map(c => c.close), highs = candles.map(c => c.high), lows = candles.map(c => c.low), opens = candles.map(c => c.open), volumes = candles.map(c => c.volume), timestamps = candles.map(c => c.timestamp);

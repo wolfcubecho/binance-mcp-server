@@ -25,7 +25,7 @@ export const Get24hrTickerSchema = z.object({
 // Market Snapshot Schemas (spot)
 export const GetMarketSnapshotSchema = z.object({
   symbol: z.string().describe('Trading pair symbol (e.g., BTCUSDT)'),
-  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d']).describe('Candle interval'),
+  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','2d','4d','1w','2w']).describe('Candle interval'),
   limit: z.number().optional().default(150).describe('Candles to analyze (default 150)'),
   compact: z.boolean().optional().default(true).describe('Return trimmed summary (default true)'),
   emas: z.array(z.number()).optional().default([20,50,200]).describe('EMA periods (e.g., [20,50,200])'),
@@ -39,7 +39,7 @@ export const GetMarketSnapshotSchema = z.object({
 
 export const GetMarketSnapshotsSchema = z.object({
   symbols: z.array(z.string()).describe('Symbols to analyze'),
-  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d']).describe('Candle interval'),
+  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','2d','4d','1w','2w']).describe('Candle interval'),
   limit: z.number().optional().default(150).describe('Candles to analyze (default 150)'),
   compact: z.boolean().optional().default(true).describe('Return trimmed summary'),
   emas: z.array(z.number()).optional().default([20,50,200]).describe('EMA periods'),
