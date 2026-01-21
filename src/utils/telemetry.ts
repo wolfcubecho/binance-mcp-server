@@ -18,7 +18,11 @@ function ensureDir(dirPath: string) {
 function telemetryFile(): string {
   const outDir = path.resolve(process.cwd(), 'data');
   ensureDir(outDir);
-  return path.join(outDir, 'telemetry.jsonl');
+  const d = new Date();
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return path.join(outDir, `telemetry-${yyyy}-${mm}-${dd}.jsonl`);
 }
 
 export function logHOBs(symbol: string, interval: string, latestClose: number | undefined, hobs: any[]): void {
@@ -45,4 +49,36 @@ export function logSnapshot(symbol: string, interval: string, latestClose: numbe
   try {
     fs.appendFileSync(file, JSON.stringify(payload) + '\n', { encoding: 'utf-8' });
   } catch {}
+}
+
+export function logShadowRecommendation(symbol: string, interval: string, recommendation: Record<string, any>): void {
+  const file = telemetryFile();
+  const payload = { ts: Date.now(), type: 'shadow_recommendation', symbol, interval, recommendation };
+  try {
+    fs.appendFileSync(file, JSON.stringify(payload) + '\n', { encoding: 'utf-8' });
+  } catch {}
+}
+
+export function logActualTrade(symbol: string, details: Record<string, any>): void {
+  const file = telemetryFile();
+  const payload = { ts: Date.now(), type: 'actual_trade', symbol, details };
+  try {
+    fs.appendFileSync(file, JSON.stringify(payload) + '\n', { encoding: 'utf-8' });
+  } catch {}
+}
+
+export function pruneOldTelemetry(days = 30): void {
+  const outDir = path.resolve(process.cwd(), 'data');
+  ensureDir(outDir);
+  const files = fs.readdirSync(outDir).filter(f => f.startsWith('telemetry-') && f.endsWith('.jsonl'));
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  for (const f of files) {
+    const fp = path.join(outDir, f);
+    try {
+      const st = fs.statSync(fp);
+      if (st.mtimeMs < cutoff) {
+        fs.unlinkSync(fp);
+      }
+    } catch {}
+  }
 }

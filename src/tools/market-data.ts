@@ -8,7 +8,8 @@ import {
 } from '../types/mcp.js';
 import { validateInput, validateSymbol } from '../utils/validation.js';
 import { handleBinanceError, sanitizeError } from '../utils/error-handling.js';
-import { logHOBs, logNote, logSnapshot } from '../utils/telemetry.js';
+import { logHOBs, logNote, logSnapshot, logShadowRecommendation } from '../utils/telemetry.js';
+import { getOverrides } from '../utils/learning-config.js';
 
 // Simple in-memory cache with TTL
 const BINANCE_CACHE_TTL_MS = parseInt(process.env.BINANCE_CACHE_TTL || '10000', 10);
@@ -273,11 +274,19 @@ export const marketDataTools = [
         emas: { type: 'array', items: { type: 'number' }, description: 'EMA periods (e.g., [20,50,200])' },
         atrPeriod: { type: 'number', description: 'ATR period (e.g., 14)' },
         fvgLookback: { type: 'number', description: 'Bars to scan for FVGs' },
+        shadowEnabled: { type: 'boolean', description: 'Emit shadow recommendations (telemetry only)' },
+        shadowName: { type: 'string', description: 'Optional shadow strategy label' },
       },
       required: ['symbol','interval']
     },
     handler: async (binanceClient: any, args: unknown) => {
-      const { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false, veryStrongMinQuality = 0.75, onlyVeryStrong = false, telemetry = false } = validateInput(GetMarketSnapshotSchema, args) as any;
+      let { symbol, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false, veryStrongMinQuality = 0.75, onlyVeryStrong = false, telemetry = false, shadowEnabled = false, shadowName = 'default' } = validateInput(GetMarketSnapshotSchema, args) as any;
+      const ov = getOverrides(symbol, interval);
+      minQuality = (minQuality ?? ov.minQuality ?? minQuality);
+      veryStrongMinQuality = (veryStrongMinQuality ?? ov.veryStrongMinQuality ?? veryStrongMinQuality);
+      requireLTFConfirmations = (requireLTFConfirmations ?? ov.requireLTFConfirmations ?? requireLTFConfirmations);
+      excludeInvalidated = (excludeInvalidated ?? ov.excludeInvalidated ?? excludeInvalidated);
+      onlyFullyMitigated = (onlyFullyMitigated ?? ov.onlyFullyMitigated ?? onlyFullyMitigated);
       const normalizeInterval = (iv: string) => (iv === '2d' ? '1d' : iv === '4d' ? '1d' : iv === '2w' ? '1w' : iv);
       const fetchInterval = normalizeInterval(interval);
       validateSymbol(symbol);
@@ -600,6 +609,28 @@ export const marketDataTools = [
               maxHobQuality,
               sfp,
             });
+            if (shadowEnabled && hobFiltered.length > 0) {
+              const best = [...hobFiltered].sort((a:any,b:any)=> (b.qualityScore||0) - (a.qualityScore||0))[0];
+              const baseAtr = atr ?? Math.max(1e-8, highs[highs.length - 1] - lows[lows.length - 1]);
+              const zoneLow = Math.min(best.zone.open, best.zone.close, best.zone.low ?? best.zone.open, best.zone.high ?? best.zone.close);
+              const zoneHigh = Math.max(best.zone.open, best.zone.close, best.zone.low ?? best.zone.open, best.zone.high ?? best.zone.close);
+              const zoneMid = (best.zone.open + best.zone.close) / 2;
+              const sl = best.type === 'bull' ? zoneLow - baseAtr * 0.25 : zoneHigh + baseAtr * 0.25;
+              const tp = best.type === 'bull' ? zoneMid + baseAtr * 1.5 : zoneMid - baseAtr * 1.5;
+              const recommendation = {
+                name: shadowName,
+                type: best.type === 'bull' ? 'long' : 'short',
+                veryStrong: !!best.isVeryStrong,
+                quality: best.qualityScore,
+                entry: { from: best.zone.open, to: best.zone.close },
+                stopLoss: sl,
+                takeProfit: tp,
+                components: best.components,
+                reasons: best.veryStrongReasons || [],
+                latest,
+              };
+              logShadowRecommendation(symbol, interval, recommendation);
+            }
           } catch {}
         }
         return snapshot;
@@ -622,11 +653,13 @@ export const marketDataTools = [
         emas: { type: 'array', items: { type: 'number' }, description: 'EMA periods' },
         atrPeriod: { type: 'number', description: 'ATR period' },
         fvgLookback: { type: 'number', description: 'Bars to scan for FVGs' },
+        shadowEnabled: { type: 'boolean', description: 'Emit shadow recommendations (telemetry only)' },
+        shadowName: { type: 'string', description: 'Optional shadow strategy label' },
       },
       required: ['symbols','interval']
     },
     handler: async (binanceClient: any, args: unknown) => {
-      const { symbols, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false, telemetry = false } = validateInput(GetMarketSnapshotsSchema, args) as any;
+      let { symbols, interval, limit = 150, compact = true, emas = [20,50,200], atrPeriod = 14, fvgLookback = 60, minQuality = 0.6, requireLTFConfirmations = false, excludeInvalidated = true, onlyFullyMitigated = false, telemetry = false, shadowEnabled = false, shadowName = 'default' } = validateInput(GetMarketSnapshotsSchema, args) as any;
       const normalizeInterval = (iv: string) => (iv === '2d' ? '1d' : iv === '4d' ? '1d' : iv === '2w' ? '1w' : iv);
       const results: any[] = [];
       for (const symbol of symbols) {
@@ -706,11 +739,16 @@ export const marketDataTools = [
               }
             }
           }
+          const ov = getOverrides(symbol, interval);
+          const minQ = (minQuality ?? ov.minQuality ?? minQuality);
+          const reqLtf = (requireLTFConfirmations ?? ov.requireLTFConfirmations ?? requireLTFConfirmations);
+          const exclInv = (excludeInvalidated ?? ov.excludeInvalidated ?? excludeInvalidated);
+          const onlyMit = (onlyFullyMitigated ?? ov.onlyFullyMitigated ?? onlyFullyMitigated);
           const filterHob = (hob: any) => {
-            const ltfOk = !requireLTFConfirmations || (hob.ltfConfirmations && (hob.ltfConfirmations.bos || hob.ltfConfirmations.choch || hob.ltfConfirmations.sfp || hob.ltfConfirmations.fvgMitigation));
-            const qualityOk = typeof hob.qualityScore === 'number' && hob.qualityScore >= minQuality;
-            const invalidationOk = !excludeInvalidated || !hob.invalidated;
-            const mitigationOk = !onlyFullyMitigated || hob.fullyMitigated;
+            const ltfOk = !reqLtf || (hob.ltfConfirmations && (hob.ltfConfirmations.bos || hob.ltfConfirmations.choch || hob.ltfConfirmations.sfp || hob.ltfConfirmations.fvgMitigation));
+            const qualityOk = typeof hob.qualityScore === 'number' && hob.qualityScore >= minQ;
+            const invalidationOk = !exclInv || !hob.invalidated;
+            const mitigationOk = !onlyMit || hob.fullyMitigated;
             return ltfOk && qualityOk && invalidationOk && mitigationOk;
           };
           const hobFiltered = hiddenOrderBlocks.filter(filterHob);
@@ -747,6 +785,28 @@ export const marketDataTools = [
                 maxHobQuality,
                 sfp,
               });
+              if (shadowEnabled && hobFiltered.length > 0) {
+                const best = [...hobFiltered].sort((a:any,b:any)=> (b.qualityScore||0) - (a.qualityScore||0))[0];
+                const baseAtr = atr ?? Math.max(1e-8, highs[highs.length - 1] - lows[lows.length - 1]);
+                const zoneLow = Math.min(best.zone.open, best.zone.close, best.zone.low ?? best.zone.open, best.zone.high ?? best.zone.close);
+                const zoneHigh = Math.max(best.zone.open, best.zone.close, best.zone.low ?? best.zone.open, best.zone.high ?? best.zone.close);
+                const zoneMid = (best.zone.open + best.zone.close) / 2;
+                const sl = best.type === 'bull' ? zoneLow - baseAtr * 0.25 : zoneHigh + baseAtr * 0.25;
+                const tp = best.type === 'bull' ? zoneMid + baseAtr * 1.5 : zoneMid - baseAtr * 1.5;
+                const recommendation = {
+                  name: shadowName,
+                  type: best.type === 'bull' ? 'long' : 'short',
+                  veryStrong: !!best.isVeryStrong,
+                  quality: best.qualityScore,
+                  entry: { from: best.zone.open, to: best.zone.close },
+                  stopLoss: sl,
+                  takeProfit: tp,
+                  components: best.components,
+                  reasons: best.veryStrongReasons || [],
+                  latest,
+                };
+                logShadowRecommendation(symbol, interval, recommendation);
+              }
             } catch {}
           }
           results.push(compact ? { symbol, interval, latest, bos, pivots: pivots.slice(-4), trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, ...emaValues, fvg: fvg.slice(-3) } : { symbol, interval, candles, bos, pivots, trend, sma50, sma200, atr, rsi, orderBlocks, hiddenOrderBlocks: hobFiltered, liquidityZones, vwap, dailyOpen, weeklyOpen, prevDayHigh, prevDayLow, sfp, emaValues, fvg });
