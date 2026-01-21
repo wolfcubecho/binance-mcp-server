@@ -9,6 +9,8 @@
 import { validateInput, validateSymbol, validateQuantity, validatePrice } from '../utils/validation.js';
 import { handleBinanceError } from '../utils/error-handling.js';
 import { isTestnetEnabled, getNetworkMode } from '../config/binance.js';
+import { loadApprovalGate } from '../utils/approval.js';
+import { logActualTrade } from '../utils/telemetry.js';
 
 function validateAndWarnMainnet(): string {
   const networkMode = getNetworkMode();
@@ -52,6 +54,10 @@ export const tradingTools = [
     },
     handler: async (binanceClient: any, args: unknown) => {
       const networkMode = validateAndWarnMainnet();
+      const gate = loadApprovalGate();
+      if (process.env.REQUIRE_APPROVAL_FOR_TRADING === 'true' && !gate.useIterationForTrading) {
+        throw new Error('Trading blocked: approval gate not yet enabled (useIterationForTrading=false).');
+      }
       
       const input = validateInput(PlaceOrderSchema, args);
       validateSymbol(input.symbol);
@@ -79,6 +85,19 @@ export const tradingTools = [
         }
 
         const orderResult = await binanceClient.order(orderParams);
+
+        try {
+          logActualTrade(input.symbol, {
+            tool: 'place_order',
+            side: input.side,
+            type: input.type,
+            quantity: input.quantity,
+            price: input.price,
+            network: networkMode,
+            gate: { useIterationForTrading: gate.useIterationForTrading, reason: gate.reason, approvedAt: gate.approvedAt },
+            orderResult,
+          });
+        } catch {}
 
         return {
           symbol: orderResult.symbol,
@@ -123,6 +142,10 @@ export const tradingTools = [
     },
     handler: async (binanceClient: any, args: unknown) => {
       const networkMode = validateAndWarnMainnet();
+      const gate = loadApprovalGate();
+      if (process.env.REQUIRE_APPROVAL_FOR_TRADING === 'true' && !gate.useIterationForTrading) {
+        throw new Error('Trading blocked: approval gate not yet enabled (useIterationForTrading=false).');
+      }
       
       const input = validateInput(CancelOrderSchema, args);
       validateSymbol(input.symbol);
@@ -171,6 +194,10 @@ export const tradingTools = [
     },
     handler: async (binanceClient: any, args: unknown) => {
       const networkMode = validateAndWarnMainnet();
+      const gate = loadApprovalGate();
+      if (process.env.REQUIRE_APPROVAL_FOR_TRADING === 'true' && !gate.useIterationForTrading) {
+        throw new Error('Trading blocked: approval gate not yet enabled (useIterationForTrading=false).');
+      }
       
       const input = validateInput(CancelAllOrdersSchema, args);
       validateSymbol(input.symbol);
@@ -224,6 +251,10 @@ export const tradingTools = [
     },
     handler: async (binanceClient: any, args: any) => {
       const networkMode = validateAndWarnMainnet();
+      const gate = loadApprovalGate();
+      if (process.env.REQUIRE_APPROVAL_FOR_TRADING === 'true' && !gate.useIterationForTrading) {
+        throw new Error('Trading blocked: approval gate not yet enabled (useIterationForTrading=false).');
+      }
       
       const axios = require('axios');
       const crypto = require('crypto');
@@ -252,7 +283,21 @@ export const tradingTools = [
         { headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY } }
       );
 
-      return { ...response.data, network: networkMode };
+      const res = { ...response.data, network: networkMode };
+      try {
+        logActualTrade(args.symbol, {
+          tool: 'place_oco',
+          side: args.side,
+          quantity: args.quantity,
+          abovePrice: args.abovePrice,
+          belowPrice: args.belowPrice,
+          belowStopPrice: args.belowStopPrice,
+          network: networkMode,
+          gate: { useIterationForTrading: gate.useIterationForTrading, reason: gate.reason, approvedAt: gate.approvedAt },
+          result: res,
+        });
+      } catch {}
+      return res;
     },
   }];
 
