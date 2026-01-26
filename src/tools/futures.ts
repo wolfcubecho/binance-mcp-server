@@ -31,6 +31,7 @@ import {
 import { validateInput, validateSymbol } from '../utils/validation.js';
 import { handleBinanceError } from '../utils/error-handling.js';
 import { getNetworkMode, getSafetyConfig } from '../config/binance.js';
+import { logTrailingEvent } from '../utils/telemetry.js';
 import {
   createOrderPreview,
   validateRiskConfirmation,
@@ -90,6 +91,73 @@ export const futuresTools = [
               positionSide: pos.positionSide,
             })),
           timestamp: Date.now(),
+        };
+      } catch (error) {
+        handleBinanceError(error);
+      }
+    },
+  },
+
+  {
+    name: 'place_futures_trailing_stop',
+    description: 'Placeth a native trailing stop order for futures (TRAILING_STOP_MARKET)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Trading pair symbol' },
+        side: { type: 'string', enum: ['BUY','SELL'], description: 'Order side' },
+        quantity: { type: 'string', description: 'Order quantity' },
+        callbackRate: { type: 'string', description: 'Trailing percent (e.g., 0.5 for 0.5%)' },
+        activationPrice: { type: 'string', description: 'Activation price for the trailing stop', nullable: true },
+        positionSide: { type: 'string', enum: ['BOTH','LONG','SHORT'], description: 'Position side for hedge mode', nullable: true },
+        confirmRisk: { type: 'boolean', description: 'Confirm understanding of trailing stop behavior', nullable: true },
+      },
+      required: ['symbol','side','quantity','callbackRate'],
+    },
+    handler: async (binanceClient: any, args: unknown) => {
+      const input = validateInput(PlaceFuturesTrailingStopSchema, args);
+      validateSymbol(input.symbol);
+
+      try {
+        const params: any = {
+          symbol: input.symbol,
+          side: input.side,
+          type: 'TRAILING_STOP_MARKET',
+          quantity: input.quantity,
+          callbackRate: input.callbackRate,
+        };
+        if (input.activationPrice) params.activationPrice = input.activationPrice;
+        if (input.positionSide) params.positionSide = input.positionSide;
+
+        const order = await binanceClient.futuresOrder(params);
+        try {
+          logTrailingEvent(input.symbol, {
+            tool: 'place_futures_trailing_stop',
+            side: input.side,
+            quantity: input.quantity,
+            callbackRate: input.callbackRate,
+            activationPrice: input.activationPrice,
+            positionSide: input.positionSide,
+            result: {
+              orderId: order.orderId,
+              status: order.status,
+              type: order.type,
+            },
+          });
+        } catch {}
+
+        return {
+          orderId: order.orderId,
+          symbol: order.symbol,
+          status: order.status,
+          clientOrderId: order.clientOrderId,
+          type: order.type,
+          side: order.side,
+          positionSide: order.positionSide,
+          updateTime: order.updateTime,
+          networkMode: getNetworkMode(),
+          timestamp: Date.now(),
+          message: '✅ Trailing stop placed',
         };
       } catch (error) {
         handleBinanceError(error);

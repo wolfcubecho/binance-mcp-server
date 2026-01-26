@@ -1,6 +1,7 @@
 import { config } from 'dotenv';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
+import https from 'https';
 import { BinanceConfig } from '../types/binance.js';
 
 config();
@@ -37,6 +38,12 @@ export function getBinanceConfig(): BinanceConfig {
       baseConfig.httpAgent = httpsAgent;
       baseConfig.httpsAgent = httpsAgent;
     }
+  }
+  else {
+    // Default keep-alive agent to reduce socket churn
+    const keepAliveAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+    (baseConfig as any).httpAgent = keepAliveAgent;
+    (baseConfig as any).httpsAgent = keepAliveAgent;
   }
 
   return baseConfig;

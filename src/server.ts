@@ -11,11 +11,13 @@ import { marketDataTools } from './tools/market-data.js';
 import { accountTools } from './tools/account.js';
 import { tradingTools } from './tools/trading.js';
 import { futuresTools } from './tools/futures.js';
+import { createRetryProxy } from './utils/retry.js';
 
 export class BinanceMCPServer {
   private server: Server;
   private binanceClient: ReturnType<typeof Binance>;
   private tools: Map<string, any>;
+  private concurrency = { current: 0, max: Number(process.env.MCP_CONCURRENCY || '4'), queue: [] as Array<() => void> };
 
   constructor() {
     validateEnvironment();
@@ -28,12 +30,14 @@ export class BinanceMCPServer {
       version: serverConfig.version,
     });
 
-      this.binanceClient = Binance({
+        const rawClient = Binance({
           apiKey: config.apiKey,
           apiSecret: config.apiSecret,
           httpBase: config.sandbox ? 'https://testnet.binance.vision' : 'https://api.binance.com',
           getTime: () => Date.now(),
       });
+        // Wrap client with retry/backoff to improve reliability under rate limits/timeouts
+        this.binanceClient = createRetryProxy(rawClient as any, 'binance');
 
     this.tools = new Map();
     this.setupTools();
@@ -65,6 +69,15 @@ export class BinanceMCPServer {
     });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const acquire = async () => {
+        if (this.concurrency.current < this.concurrency.max) { this.concurrency.current++; return; }
+        await new Promise<void>(resolve => this.concurrency.queue.push(resolve));
+        this.concurrency.current++;
+      };
+      const release = () => {
+        this.concurrency.current = Math.max(0, this.concurrency.current - 1);
+        const next = this.concurrency.queue.shift(); if (next) next();
+      };
       const { name, arguments: args } = request.params;
       
       const tool = this.tools.get(name);
@@ -72,8 +85,14 @@ export class BinanceMCPServer {
         throw new Error(`Unknown tool: ${name}`);
       }
 
+      const started = Date.now();
       try {
+        await acquire();
         const result = await tool.handler(this.binanceClient, args);
+        if (process.env.LOG_LEVEL === 'debug') {
+          const ms = Date.now() - started;
+          console.error(`[perf] tool=${name} durMs=${ms} inflight=${this.concurrency.current}`);
+        }
         return {
           content: [
             {
@@ -115,6 +134,8 @@ export class BinanceMCPServer {
           ],
           isError: true,
         };
+      } finally {
+        release();
       }
     });
   }

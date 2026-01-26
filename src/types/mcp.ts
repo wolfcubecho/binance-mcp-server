@@ -25,40 +25,22 @@ export const Get24hrTickerSchema = z.object({
 // Market Snapshot Schemas (spot)
 export const GetMarketSnapshotSchema = z.object({
   symbol: z.string().describe('Trading pair symbol (e.g., BTCUSDT)'),
-  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','2d','4d','1w','2w']).describe('Candle interval'),
+  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d']).describe('Candle interval'),
   limit: z.number().optional().default(150).describe('Candles to analyze (default 150)'),
   compact: z.boolean().optional().default(true).describe('Return trimmed summary (default true)'),
   emas: z.array(z.number()).optional().default([20,50,200]).describe('EMA periods (e.g., [20,50,200])'),
   atrPeriod: z.number().optional().default(14).describe('ATR period (e.g., 14)'),
-  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs'),
-  minQuality: z.number().optional().default(0.6).describe('Minimum quality score for hidden order blocks'),
-  requireLTFConfirmations: z.boolean().optional().default(false).describe('Require LTF confirmations (BOS/ChoCh/SFP/FVG mitigation) for HOBs'),
-  excludeInvalidated: z.boolean().optional().default(true).describe('Exclude HOBs marked invalidated'),
-  onlyFullyMitigated: z.boolean().optional().default(false).describe('Include only fully mitigated HOBs'),
-  veryStrongMinQuality: z.number().optional().default(0.75).describe('Quality threshold to flag very-strong setups'),
-  onlyVeryStrong: z.boolean().optional().default(false).describe('Filter to return only very-strong setups')
-  ,telemetry: z.boolean().optional().default(false).describe('If true, log HOBs to data/telemetry.jsonl for learning')
-  ,shadowEnabled: z.boolean().optional().default(false).describe('Emit shadow recommendations (telemetry only)')
-  ,shadowName: z.string().optional().default('default').describe('Optional shadow strategy label')
+  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs')
 });
 
 export const GetMarketSnapshotsSchema = z.object({
   symbols: z.array(z.string()).describe('Symbols to analyze'),
-  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','2d','4d','1w','2w']).describe('Candle interval'),
+  interval: z.enum(['1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d']).describe('Candle interval'),
   limit: z.number().optional().default(150).describe('Candles to analyze (default 150)'),
   compact: z.boolean().optional().default(true).describe('Return trimmed summary'),
   emas: z.array(z.number()).optional().default([20,50,200]).describe('EMA periods'),
   atrPeriod: z.number().optional().default(14).describe('ATR period'),
-  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs'),
-  minQuality: z.number().optional().default(0.6).describe('Minimum quality score for hidden order blocks'),
-  requireLTFConfirmations: z.boolean().optional().default(false).describe('Require LTF confirmations for HOBs'),
-  excludeInvalidated: z.boolean().optional().default(true).describe('Exclude HOBs marked invalidated'),
-  onlyFullyMitigated: z.boolean().optional().default(false).describe('Include only fully mitigated HOBs'),
-  veryStrongMinQuality: z.number().optional().default(0.75).describe('Quality threshold to flag very-strong setups'),
-  onlyVeryStrong: z.boolean().optional().default(false).describe('Filter to return only very-strong setups')
-  ,telemetry: z.boolean().optional().default(false).describe('If true, log HOBs to data/telemetry.jsonl for learning')
-  ,shadowEnabled: z.boolean().optional().default(false).describe('Emit shadow recommendations (telemetry only)')
-  ,shadowName: z.string().optional().default('default').describe('Optional shadow strategy label')
+  fvgLookback: z.number().optional().default(60).describe('Bars to scan for FVGs')
 });
 
 export const GetAccountInfoSchema = z.object({});
